@@ -1,12 +1,15 @@
 import * as esprima from 'esprima';
+import * as escodegen  from 'escodegen';
+
 const parseCode = (codeToParse) => {
     let parsedJson = esprima.parseScript(codeToParse,{loc:true});
     return parsedJson;
 };
 const getTaggedJsonCode =(parsedJSON) => {
+
     HtmlViewData=[];
-    let x =JSON.parse(parsedJSON);
-    x.body.forEach(function (expression) {tagJSON(expression);});
+    tagJSON(JSON.parse(parsedJSON));
+
     return HtmlViewData;
 };
 
@@ -22,6 +25,11 @@ const JsonTypeToHandlerMap={
     'Identifier':tagIdentifier,
     'Literal':tagLiteral,
     'BinaryExpression':tagBinaryExpression,
+    'MemberExpression':tagMemberExpression,
+    'VariableDeclarator':tagVariableDeclarator,
+    'UpdateExpression':tagUpdateExpression,
+    'Program': tagProgram,
+    'UnaryExpression':tagUnaryExpression,
 };
 
 let HtmlViewData;
@@ -30,11 +38,19 @@ function tagJSON(JSON) {
     if(JSON==null) {return JSON;}
     return JsonTypeToHandlerMap[JSON.type](JSON);
 }
+function tagUnaryExpression(jsonNode) {return escodegen.generate(jsonNode);}
+function tagProgram(jsonNode) {jsonNode.body.forEach(function (currNode) { tagJSON(currNode);});}
+function tagUpdateExpression(jsonNode) {return escodegen.generate(jsonNode);}
+function tagMemberExpression(jsonNode) {return escodegen.generate(jsonNode);}
+function tagVariableDeclarator(jsonNode) {
+    let currentNode = new Node(jsonNode.loc.start.line,'variable declarator', tagJSON(jsonNode.id),tagJSON(jsonNode.init),'');
+    HtmlViewData.push(currentNode);
+}
 
-function tagIdentifier(jsonNode) {return jsonNode.name;}
+function tagIdentifier(jsonNode) {return escodegen.generate(jsonNode);}
 function tagLiteral(jsonNode) {return jsonNode.value;}
 
-function tagBinaryExpression(jsonNode) {return tagJSON(jsonNode.left()+jsonNode.operator+jsonNode.right)}
+function tagBinaryExpression(jsonNode) {return escodegen.generate(jsonNode);}
 
 function tagFunction(jsonNode) {
     let currentNode = new Node(jsonNode.loc.start.line, 'function declaration',jsonNode.id.name,'','');
@@ -45,12 +61,10 @@ function tagFunction(jsonNode) {
 
 function tagVariableDeclaration(jsonNode) {
     if(jsonNode.declarations!=null){
-    jsonNode.declarations.forEach(function (currDeclaration) {
-        let currentNode;
-        if(currDeclaration.init!=null) {currentNode= new Node(currDeclaration.loc.start.line, 'variable declaration', currDeclaration.id.name, currDeclaration.init.value, '');}
-        else {currentNode= new Node(currDeclaration.loc.start.line, 'variable declaration', currDeclaration.id.name, '', '');}
-        HtmlViewData.push(currentNode);
-    });}
+        jsonNode.declarations.forEach(function (currDeclaration) {
+            tagJSON(currDeclaration);
+        });
+    }
 }
 
 function tagExpressionStatement(jsonNode) {return tagJSON(jsonNode.expression);}
@@ -69,18 +83,15 @@ function tagWhileStatement(jsonNode) {
     }
 }
 
-function tagIfStatement(jsonNode) {
-    let currentNode = new Node(jsonNode.loc.start.line,'if statement','','',tagJSON(jsonNode.test.left) + ' ' + jsonNode.test.operator + ' ' + tagJSON(jsonNode.test.right));
+function tagIfStatement(jsonNode,elseIf) {
+    let type = 'if statement';
+    if(elseIf){type='else if statement';}
+    let currentNode = new Node(jsonNode.loc.start.line,type,'','',tagJSON(jsonNode.test.left) + ' ' + jsonNode.test.operator + ' ' + tagJSON(jsonNode.test.right));
     HtmlViewData.push(currentNode);
-    if(jsonNode.consequent!=null&&jsonNode.consequent.body!=null) {
-        jsonNode.consequent.body.forEach(function (nodeInBody) {
-            tagJSON(nodeInBody);
-        });
-    }
-    if (jsonNode.alternate!=null&&jsonNode.alternate.body!=null) {
-        jsonNode.alternate.body.forEach(function (nodeInElseBody) {
-            tagJSON(nodeInElseBody);
-        });
+    if(jsonNode.consequent!=null){tagJSON(jsonNode.consequent);}
+    if (jsonNode.alternate!=null) {
+        if(jsonNode.alternate.type  === jsonNode.type){tagIfStatement(jsonNode.alternate, true);}
+        else {tagJSON(jsonNode.alternate);}
     }
 }
 
